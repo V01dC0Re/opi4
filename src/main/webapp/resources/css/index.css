@@ -1,0 +1,38 @@
+/* Container centered */
+.container {
+    width: 600px;
+    margin: 100px auto;
+    text-align: center;
+    font-family: sans-serif;
+}
+
+/* Header block */
+header {
+    background-color: #e9e9e9;
+    padding: 15px;
+    border-radius: 8px;
+    font-weight: bold;
+    font-size: 18px;
+}
+
+#clock {
+    display: block;
+    margin-top: 10px;
+    font-size: 20px;
+    color: #2a4d9f;
+}
+
+/* Link button */
+.link {
+    display: inline-block;
+    margin-top: 30px;
+    padding: 10px 20px;
+    background-color: #4c80ff;
+    color: white;
+    border-radius: 6px;
+    text-decoration: none;
+}
+
+.link:hover {
+    background-color: #345edb;
+}

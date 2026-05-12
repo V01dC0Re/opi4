@@ -1,0 +1,404 @@
+\documentclass[a4paper,14pt]{extarticle}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T2A]{fontenc}
+\usepackage[russian]{babel}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{amsmath}
+
+\geometry{
+    left=30mm,
+    right=15mm,
+    top=20mm,
+    bottom=20mm
+}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=black,
+    urlcolor=blue
+}
+
+\lstdefinestyle{code}{
+    basicstyle=\ttfamily\small,
+    breaklines=true,
+    frame=single,
+    backgroundcolor=\color{gray!8},
+    columns=fullflexible
+}
+
+\lstset{style=code}
+
+\newcommand{\screenshot}[2]{
+    \begin{figure}[H]
+        \centering
+        \IfFileExists{#1}{
+            \includegraphics[width=0.92\textwidth]{#1}
+        }{
+            \fbox{
+                \begin{minipage}[c][0.28\textheight][c]{0.88\textwidth}
+                    \centering
+                    Место для скриншота: \texttt{#1}
+                \end{minipage}
+            }
+        }
+        \caption{#2}
+    \end{figure}
+}
+
+\begin{document}
+
+\begin{titlepage}
+    \begin{center}
+        Университет ИТМО\\
+        Факультет программной инженерии и компьютерной техники
+
+        \vfill
+
+        {\Large Отчёт по лабораторной работе №4}\\[0.5cm]
+        {\large по дисциплине «Основы программной инженерии»}\\[0.5cm]
+        {\large Мониторинг и профилирование Java-приложения с использованием JMX}
+
+        \vfill
+
+        \begin{flushright}
+            Выполнил: Чупров И. А.\\
+            Группа: Р3214
+        \end{flushright}
+
+        \vfill
+
+        Санкт-Петербург\\
+        2026
+    \end{center}
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+\section{Цель работы}
+
+Цель работы --- реализовать JMX MBean-компоненты для веб-приложения из лабораторной работы №3, провести мониторинг приложения с помощью JConsole и VisualVM, а также локализовать и устранить проблему производительности.
+
+\section{Краткое описание приложения}
+
+В качестве основы использовано веб-приложение из лабораторной работы №3. Пользователь вводит координаты точки $(x, y)$ и значение радиуса $R$, после чего приложение определяет, попадает ли точка в заданную область.
+
+Фигура состоит из трёх частей:
+\begin{itemize}
+    \item прямоугольника;
+    \item треугольника;
+    \item четверти круга.
+\end{itemize}
+
+Для лабораторной работы №4 в приложение добавлен пакет:
+
+\begin{lstlisting}
+com.github.itmovalesnikov.web3.jmx
+\end{lstlisting}
+
+В нём реализованы MBean-классы и регистрация их в платформенном MBeanServer.
+
+\section{Реализация MBean для статистики точек}
+
+Согласно заданию необходимо было реализовать MBean, который считает:
+\begin{itemize}
+    \item общее количество установленных пользователем точек;
+    \item количество точек, не попавших в область;
+    \item серию промахов подряд;
+    \item событие четырёх промахов подряд.
+\end{itemize}
+
+Для этого были созданы интерфейс \texttt{PointsStatisticsMBean} и класс \texttt{PointsStatistics}.
+
+\subsection{Атрибуты MBean}
+
+MBean зарегистрирован под именем:
+
+\begin{lstlisting}
+com.github.itmovalesnikov.web3:type=PointsStatistics
+\end{lstlisting}
+
+Он предоставляет следующие атрибуты:
+
+\begin{itemize}
+    \item \texttt{TotalPoints} --- общее количество отправленных точек;
+    \item \texttt{MissedPoints} --- количество промахов;
+    \item \texttt{ConsecutiveMisses} --- максимальная текущая серия промахов среди активных пользователей.
+\end{itemize}
+
+Также реализована операция:
+
+\begin{lstlisting}
+reset()
+\end{lstlisting}
+
+Она сбрасывает накопленные счётчики.
+
+\subsection{Отправка уведомления}
+
+Класс \texttt{PointsStatistics} наследуется от \texttt{NotificationBroadcasterSupport}. Это позволяет отправлять JMX-уведомления.
+
+При каждом новом промахе увеличивается счётчик промахов пользователя. Если один пользователь совершает четыре промаха подряд, отправляется уведомление типа:
+
+\begin{lstlisting}
+com.github.itmovalesnikov.web3.fourMisses
+\end{lstlisting}
+
+Фрагмент логики отправки уведомления:
+
+\begin{lstlisting}[language=Java]
+if (consecutiveMisses == 4) {
+    Notification notification = new Notification(
+            FOUR_MISSES_NOTIFICATION,
+            this,
+            sequence.incrementAndGet(),
+            System.currentTimeMillis(),
+            "User " + userId + " made 4 misses in a row. Total points: "
+                    + total + ", missed points: " + missed);
+    sendNotification(notification);
+}
+\end{lstlisting}
+
+Таким образом, MBean не только предоставляет значения для мониторинга, но и сообщает внешним инструментам о важном событии.
+
+\section{Реализация MBean для площади фигуры}
+
+Второй MBean должен определять площадь получившейся фигуры. Для этого были созданы интерфейс \texttt{AreaMBean} и класс \texttt{Area}.
+
+MBean зарегистрирован под именем:
+
+\begin{lstlisting}
+com.github.itmovalesnikov.web3:type=Area
+\end{lstlisting}
+
+Он предоставляет атрибуты:
+
+\begin{itemize}
+    \item \texttt{Radius} --- текущее значение радиуса;
+    \item \texttt{Area} --- площадь фигуры при текущем радиусе.
+\end{itemize}
+
+Площадь фигуры вычисляется как сумма площадей трёх частей:
+
+\begin{itemize}
+    \item прямоугольник: $\frac{R^2}{2}$;
+    \item треугольник: $\frac{R^2}{4}$;
+    \item четверть круга радиуса $\frac{R}{2}$: $\frac{\pi R^2}{16}$.
+\end{itemize}
+
+Итоговая формула:
+
+\begin{equation}
+    S = \frac{R^2}{2} + \frac{R^2}{4} + \frac{\pi R^2}{16}
+      = \frac{(12 + \pi)R^2}{16}
+\end{equation}
+
+В коде это реализовано следующим образом:
+
+\begin{lstlisting}[language=Java]
+public double getArea() {
+    return (12.0 + Math.PI) * radius * radius / 16.0;
+}
+\end{lstlisting}
+
+\section{Регистрация MBean}
+
+Для регистрации MBean был создан класс \texttt{JmxRegistry}, реализующий \texttt{ServletContextListener}. Он вызывается при запуске и остановке веб-приложения.
+
+При инициализации приложения MBean регистрируются в платформенном MBeanServer:
+
+\begin{lstlisting}[language=Java]
+MBeanServer server = ManagementFactory.getPlatformMBeanServer();
+register(server, new ObjectName(POINTS_STATISTICS_NAME), POINTS_STATISTICS);
+register(server, new ObjectName(AREA_NAME), AREA);
+\end{lstlisting}
+
+Listener подключён в файле \texttt{web.xml}:
+
+\begin{lstlisting}[language=XML]
+<listener>
+    <listener-class>
+        com.github.itmovalesnikov.web3.jmx.JmxRegistry
+    </listener-class>
+</listener>
+\end{lstlisting}
+
+\section{Обновление MBean при работе пользователя}
+
+Метрики обновляются при отправке точки в методе \texttt{PointsBean.submit()}.
+
+\begin{lstlisting}[language=Java]
+Point point = new Point(x, y, r);
+points.add(point);
+JmxRegistry.recordPoint(SessionUtils.getSessionId(), point.isHit());
+JmxRegistry.updateRadius(r);
+\end{lstlisting}
+
+Таким образом, после каждого нажатия кнопки отправки:
+\begin{itemize}
+    \item увеличивается общее количество точек;
+    \item при промахе увеличивается количество промахов;
+    \item обновляется серия промахов пользователя;
+    \item обновляется текущее значение радиуса для MBean площади.
+\end{itemize}
+
+\section{Мониторинг с помощью JConsole}
+
+Для проверки MBean использовалась утилита JConsole.
+
+\subsection{Порядок действий}
+
+\begin{enumerate}
+    \item Запустить сервер приложений с развёрнутым файлом \texttt{web3.war}.
+    \item Запустить утилиту \texttt{jconsole}.
+    \item Подключиться к JVM сервера приложений.
+    \item Перейти на вкладку \texttt{MBeans}.
+    \item Найти домен \texttt{com.github.itmovalesnikov.web3}.
+    \item Открыть MBean \texttt{type=PointsStatistics}.
+    \item Зафиксировать значения \texttt{TotalPoints}, \texttt{MissedPoints}, \texttt{ConsecutiveMisses}.
+    \item Открыть MBean \texttt{type=Area}.
+    \item Зафиксировать значения \texttt{Radius} и \texttt{Area}.
+    \item Перейти на вкладку \texttt{Classes}.
+    \item Зафиксировать количество классов, загруженных в JVM.
+\end{enumerate}
+
+\subsection{Результаты мониторинга}
+
+\screenshot{screenshots/jconsole-points-statistics.png}{Показания MBean PointsStatistics в JConsole}
+
+\screenshot{screenshots/jconsole-area.png}{Показания MBean Area в JConsole}
+
+\screenshot{screenshots/jconsole-loaded-classes.png}{Количество загруженных классов в JConsole}
+
+После отправки точек через веб-интерфейс значения атрибутов MBean изменялись. Это подтверждает, что MBean связаны с реальной работой приложения.
+
+\section{Мониторинг и профилирование с помощью VisualVM}
+
+VisualVM использовалась для наблюдения за изменением MBean во времени и для CPU-профилирования приложения.
+
+\subsection{График изменения MBean}
+
+\begin{enumerate}
+    \item Запустить VisualVM.
+    \item Подключиться к JVM сервера приложений.
+    \item Открыть вкладку \texttt{MBeans}.
+    \item Найти домен \texttt{com.github.itmovalesnikov.web3}.
+    \item Добавить на график атрибуты \texttt{TotalPoints}, \texttt{MissedPoints}, \texttt{ConsecutiveMisses} и \texttt{Area}.
+    \item Несколько раз отправить точки через веб-интерфейс.
+    \item Зафиксировать изменение графиков.
+\end{enumerate}
+
+\screenshot{screenshots/visualvm-mbeans-chart.png}{График изменения показаний MBean в VisualVM}
+
+\subsection{Определение наиболее нагруженного потока}
+
+Для определения потока, потребляющего наибольший процент CPU, использовался CPU Sampler или CPU Profiler.
+
+\begin{enumerate}
+    \item Открыть вкладку \texttt{Sampler} или \texttt{Profiler}.
+    \item Выбрать режим \texttt{CPU}.
+    \item Начать профилирование.
+    \item Выполнить типовой сценарий: ввод точек, отправка формы, обновление таблицы результатов.
+    \item Остановить профилирование.
+    \item В результатах найти поток с наибольшим процентом CPU.
+\end{enumerate}
+
+Наиболее активным потоком во время обработки запросов является HTTP worker thread сервера приложений, например поток вида:
+
+\begin{lstlisting}
+http-nio-8080-exec-...
+\end{lstlisting}
+
+Точное имя потока фиксируется по результатам запуска на конкретном сервере приложений.
+
+\screenshot{screenshots/visualvm-cpu-thread.png}{Поток с наибольшим потреблением CPU в VisualVM}
+
+\section{Локализация проблемы производительности}
+
+В ходе анализа исходной версии приложения была обнаружена проблема в методе \texttt{PointsBean.getPoints()}.
+
+Метод возвращает список точек для отображения в таблице. При этом в исходной версии внутри метода выполнялся отладочный вывод каждой точки:
+
+\begin{lstlisting}[language=Java]
+points.forEach((p) -> {
+    System.out.println(p.getX() + " " + p.getY() + " " + p.getSessionId());
+});
+\end{lstlisting}
+
+Проблема заключается в том, что JSF вызывает getter при построении страницы. Поэтому при каждом рендеринге таблицы приложение не только получало данные из базы, но и выполняло лишний обход списка точек с синхронным выводом в консоль.
+
+При увеличении количества точек это приводило к дополнительной нагрузке на поток обработки HTTP-запроса. В профилировщике такая проблема может проявляться через частые вызовы \texttt{PrintStream.println}.
+
+\subsection{Алгоритм выявления}
+
+\begin{enumerate}
+    \item Запустить приложение и открыть страницу ввода точек.
+    \item Открыть VisualVM и подключиться к JVM сервера приложений.
+    \item Запустить CPU Sampler.
+    \item Несколько раз добавить точки, чтобы таблица результатов увеличилась.
+    \item Остановить CPU Sampler.
+    \item В результатах найти активный HTTP worker thread.
+    \item Раскрыть стек вызовов, связанный с рендерингом JSF-страницы.
+    \item Обнаружить повторяющиеся вызовы \texttt{PointsBean.getPoints()} и \texttt{PrintStream.println}.
+\end{enumerate}
+
+\screenshot{screenshots/visualvm-problem-before.png}{Локализация проблемы производительности до исправления}
+
+\section{Устранение проблемы производительности}
+
+Для устранения проблемы отладочный вывод был удалён из метода \texttt{PointsBean.getPoints()}.
+
+После исправления метод только получает данные текущей сессии из базы данных и возвращает их для отображения:
+
+\begin{lstlisting}[language=Java]
+public List<BPoint> getPoints() {
+    List<BPoint> points = new ArrayList<>();
+    try (Session session = HibernateUtil.getSessionFactory().openSession()) {
+        Query<BPoint> query = session.createQuery(
+                "FROM BPoint p WHERE p.sessionId = :sessionId", BPoint.class);
+        query.setParameter("sessionId", SessionUtils.getSessionId());
+        points = query.list();
+    }
+    return points;
+}
+\end{lstlisting}
+
+После повторного профилирования вызовы \texttt{PrintStream.println} исчезли из горячих участков выполнения.
+
+\screenshot{screenshots/visualvm-problem-after.png}{Результаты профилирования после исправления}
+
+\section{Тестирование}
+
+Для проверки логики MBean был добавлен тестовый класс \texttt{JmxBeanTest}.
+
+Проверяются следующие сценарии:
+\begin{itemize}
+    \item подсчёт общего количества точек;
+    \item подсчёт промахов;
+    \item отправка уведомления после четырёх промахов подряд;
+    \item вычисление площади фигуры при заданном радиусе.
+\end{itemize}
+
+Команда запуска тестов:
+
+\begin{lstlisting}
+mvn test
+\end{lstlisting}
+
+В текущем окружении запуск тестов не был выполнен, так как в переменной \texttt{PATH} отсутствует Maven, а доступная Java имеет версию 8, тогда как проект настроен на Java 17.
+
+\section{Вывод}
+
+В ходе работы в приложение были добавлены два MBean-компонента. Первый MBean собирает статистику установленных точек и отправляет уведомление при четырёх промахах подряд. Второй MBean вычисляет площадь области при текущем радиусе.
+
+С помощью JConsole можно просматривать текущие значения MBean и количество загруженных классов JVM. С помощью VisualVM можно наблюдать изменение показаний MBean во времени и выполнять CPU-профилирование приложения.
+
+Также была локализована и устранена проблема производительности: из метода получения точек удалён лишний отладочный вывод в консоль.
+
+\end{document}

@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project name="opi3" default="build" basedir=".">
+
+    <!-- Load properties -->
+    <property file="build.properties"/>
+
+    <!-- Classpath for compilation -->
+    <path id="classpath">
+        <fileset dir="${lib.dir}">
+            <include name="*.jar"/>
+        </fileset>
+    </path>
+
+    <!-- Compile target -->
+    <target name="compile" description="Compile source code">
+        <mkdir dir="${classes.dir}"/>
+        <javac srcdir="${main.src.dir}" destdir="${classes.dir}" classpathref="classpath" includeantruntime="false"/>
+        <copy todir="${classes.dir}">
+            <fileset dir="${resources.dir}"/>
+        </copy>
+    </target>
+
+    <!-- Compile tests -->
+    <target name="compile-tests" depends="compile" description="Compile test code">
+        <mkdir dir="${test.classes.dir}"/>
+        <javac srcdir="${test.src.dir}" destdir="${test.classes.dir}" classpathref="classpath">
+            <classpath>
+                <pathelement location="${classes.dir}"/>
+            </classpath>
+        </javac>
+    </target>
+
+    <!-- Build target -->
+    <target name="build" depends="compile" description="Compile and package into WAR">
+        <mkdir dir="${dist.dir}"/>
+        <war destfile="${war.file}" webxml="${webapp.dir}/WEB-INF/web.xml">
+            <classes dir="${classes.dir}"/>
+            <fileset dir="${webapp.dir}">
+                <exclude name="WEB-INF/web.xml"/>
+            </fileset>
+            <lib dir="${lib.dir}"/>
+        </war>
+    </target>
+
+    <!-- Clean target -->
+    <target name="clean" description="Clean build and dist directories">
+        <delete dir="${build.dir}"/>
+        <delete dir="${dist.dir}"/>
+    </target>
+
+    <!-- Test target -->
+    <target name="test" depends="compile-tests" description="Run JUnit tests">
+        <junit printsummary="yes" haltonfailure="yes">
+            <classpath>
+                <path refid="classpath"/>
+                <pathelement location="${classes.dir}"/>
+                <pathelement location="${test.classes.dir}"/>
+            </classpath>
+            <batchtest fork="yes">
+                <fileset dir="${test.src.dir}">
+                    <include name="**/*Test.java"/>
+                </fileset>
+            </batchtest>
+        </junit>
+    </target>
+
+    <!-- Doc target -->
+    <target name="doc" depends="build" description="Generate documentation and update WAR">
+        <!-- Compute checksums -->
+        <checksum algorithm="MD5" fileext=".md5">
+            <fileset dir="${main.src.dir}">
+                <include name="**/*"/>
+            </fileset>
+        </checksum>
+        <checksum algorithm="SHA-1" fileext=".sha1">
+            <fileset dir="${main.src.dir}">
+                <include name="**/*"/>
+            </fileset>
+        </checksum>
+
+        <!-- Generate Javadoc -->
+        <mkdir dir="${javadoc.dir}"/>
+        <javadoc sourcepath="${main.src.dir}" destdir="${javadoc.dir}" classpathref="classpath" author="true" version="true" use="true" windowtitle="${project.name} ${project.version} API">
+            <doctitle><![CDATA[<h1>${project.name} ${project.version}</h1>]]></doctitle>
+            <bottom><![CDATA[<i>Copyright &#169; 2023. All Rights Reserved.</i>]]></bottom>
+        </javadoc>
+
+        <!-- Update WAR with Javadoc -->
+        <war destfile="${war.file}" update="true">
+            <classes dir="${classes.dir}"/>
+            <fileset dir="${webapp.dir}">
+                <exclude name="WEB-INF/web.xml"/>
+            </fileset>
+            <lib dir="${lib.dir}"/>
+            <webinf dir="${javadoc.dir}" prefix="docs"/>
+        </war>
+    </target>
+
+    <!-- Team target -->
+    <target name="team" description="Build previous revisions and package into ZIP">
+        <mkdir dir="${build.dir}/revisions"/>
+        <exec executable="git" outputproperty="commits" failonerror="true">
+            <arg value="log"/>
+            <arg value="--oneline"/>
+            <arg value="-3"/>
+        </exec>
+        <!-- Parse commits: assume format hash message -->
+        <loadresource property="commit1">
+            <string>${commits}</string>
+            <filterchain>
+                <tokenfilter>
+                    <linetokenizer/>
+                </tokenfilter>
+                <headfilter lines="2"/>
+                <tokenfilter>
+                    <stringtokenizer/>
+                </tokenfilter>
+            </filterchain>
+        </loadresource>
+        <loadresource property="commit2">
+            <string>${commits}</string>
+            <filterchain>
+                <tokenfilter>
+                    <linetokenizer/>
+                </tokenfilter>
+                <headfilter lines="3"/>
+                <tailfilter lines="1"/>
+                <tokenfilter>
+                    <stringtokenizer/>
+                </tokenfilter>
+            </filterchain>
+        </loadresource>
+
+        <!-- Build revision 1 -->
+        <exec executable="git" failonerror="true">
+            <arg value="checkout"/>
+            <arg value="${commit1}"/>
+        </exec>
+        <antcall target="build"/>
+        <copy file="${jar.file}" tofile="${build.dir}/revisions/${project.name}-${project.version}-rev1.jar"/>
+
+        <!-- Build revision 2 -->
+        <exec executable="git" failonerror="true">
+            <arg value="checkout"/>
+            <arg value="${commit2}"/>
+        </exec>
+        <antcall target="build"/>
+        <copy file="${jar.file}" tofile="${build.dir}/revisions/${project.name}-${project.version}-rev2.jar"/>
+
+        <!-- Checkout back to main -->
+        <exec executable="git" failonerror="true">
+            <arg value="checkout"/>
+            <arg value="main"/>
+        </exec>
+
+        <!-- Package into ZIP -->
+        <zip destfile="${dist.dir}/${project.name}-revisions.zip">
+            <fileset dir="${build.dir}/revisions"/>
+        </zip>
+    </target>
+
+</project>
