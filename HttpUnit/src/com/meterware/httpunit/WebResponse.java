@@ -53,9 +53,6 @@ public class WebResponse implements HTMLSegment, CookieSource {
     private static final String FAUX_XHTML_CONTENT = "text/xhtml";
 
     private static final int UNINITIALIZED_INT = -2;
-    private static final int UNKNOWN_LENGTH_TIMEOUT = 500;
-    private static final int UNKNOWN_LENGTH_RETRY_INTERVAL = 10;
-
     private FrameSelector _frame;
 
     private String  _baseTarget;
@@ -952,27 +949,15 @@ public class WebResponse implements HTMLSegment, CookieSource {
                 count = inputStream.read( buffer, 0, Math.min( maxBytes, buffer.length ) );
             } while (count != -1);
         } else {
-            do {
+            count = inputStream.read( buffer, 0, buffer.length );
+            while (count != -1) {
                 outputStream.write( buffer, 0, count );
-                int available = getAvailableBytes( inputStream );
-                count = (available == 0) ? -1 : inputStream.read( buffer, 0, buffer.length );
-            } while (count != -1);
+                count = inputStream.read( buffer, 0, buffer.length );
+            }
         }
 
         byte[] bytes = outputStream.toByteArray();
         return bytes;
-    }
-
-
-    private int getAvailableBytes( InputStream inputStream ) throws IOException {
-        int timeLeft = UNKNOWN_LENGTH_TIMEOUT;
-        int available;
-        do {
-            timeLeft -= UNKNOWN_LENGTH_RETRY_INTERVAL;
-            try { Thread.sleep( UNKNOWN_LENGTH_RETRY_INTERVAL ); } catch (InterruptedException e) {}
-            available = inputStream.available();
-        } while (available == 0 && timeLeft > 0);
-        return available;
     }
 
 
@@ -1338,11 +1323,9 @@ class DefaultWebResponse extends WebResponse {
 
 
     public String toString() {
-        try {
-            return "DefaultWebResponse [" + getText() + "]";
-        } catch (IOException e) { // should never happen
-            return "DefaultWebResponse [???]";
-        }
+        return "DefaultWebResponse [url=" + getURL() +
+               "; responseCode=" + getResponseCode() +
+               "; contentType=" + getContentType() +
+               "; contentLength=" + getContentLength() + "]";
     }
 }
-

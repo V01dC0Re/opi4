@@ -58,7 +58,7 @@ class HttpWebResponse extends WebResponse {
         /** make sure that any IO exception for HTML received page happens here, not later. **/
         if (_responseCode < HttpURLConnection.HTTP_BAD_REQUEST || !throwExceptionOnError) {
             defineRawInputStream( new BufferedInputStream( getInputStream( connection ) ) );
-            if (getContentType().startsWith( "text" )) loadResponseText();
+            if (isHTML()) loadResponseText();
         }
     }
 
@@ -234,4 +234,3 @@ class HttpWebResponse extends WebResponse {
     }
 
 }
-

@@ -47,7 +47,7 @@ class ServletUnitWebResponse extends WebResponse {
         /** make sure that any IO exception for HTML received page happens here, not later. **/
         if (getResponseCode() < HttpURLConnection.HTTP_BAD_REQUEST || !throwExceptionOnError) {
             defineRawInputStream( new ByteArrayInputStream( _response.getContents() ) );
-            if (getContentType().startsWith( "text" )) loadResponseText();
+            if (isHTML()) loadResponseText();
         }
     }
 
@@ -108,4 +108,3 @@ class ServletUnitWebResponse extends WebResponse {
     private ServletUnitHttpResponse _response;
 
 }
-
