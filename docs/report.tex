@@ -298,7 +298,8 @@ VisualVM использовалась для наблюдения за изме�
     \item Зафиксировать изменение графиков.
 \end{enumerate}
 
-\screenshot{screenshots/visualvm-mbeans-chart.png}{График изменения показаний MBean в VisualVM}
+\screenshot{screenshots/visualvm-mbeans-chart-points.png}{График изменения показаний PointsStatistics в VisualVM}
+\screenshot{screenshots/visualvm-mbeans-chart-area.png}{График изменения показаний Area в VisualVM}
 
 \subsection{Определение наиболее нагруженного потока}
 
@@ -313,13 +314,10 @@ VisualVM использовалась для наблюдения за изме�
     \item В результатах найти поток с наибольшим процентом CPU.
 \end{enumerate}
 
-Наиболее активным потоком во время обработки запросов является HTTP worker thread сервера приложений, например поток вида:
-
+Наиболее активным потоком во время обработки запросов является
 \begin{lstlisting}
-http-nio-8080-exec-...
+pool-12-thread-18
 \end{lstlisting}
-
-Точное имя потока фиксируется по результатам запуска на конкретном сервере приложений.
 
 \screenshot{screenshots/visualvm-cpu-thread.png}{Поток с наибольшим потреблением CPU в VisualVM}
 
