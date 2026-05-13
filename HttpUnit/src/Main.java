@@ -27,6 +27,8 @@ import org.xml.sax.SAXException;
  */
 public class Main {
 
+    private static final int DEFAULT_REQUEST_COUNT = 100;
+
     /** Creates a new instance of Main */
     public Main() {
     }
@@ -40,15 +42,17 @@ public class Main {
             ServletRunner sr = new ServletRunner();
             sr.registerServlet("myServlet", HelloWorld.class.getName());
             ServletUnitClient sc = sr.newClient();
-            int number = 1;
+            int requestCount = getRequestCount(args);
             WebRequest request = new GetMethodWebRequest("http://test.meterware.com/myServlet");
-            while (true) {
+            long startedAt = System.currentTimeMillis();
+            for (int number = 1; number <= requestCount; number++) {
                 WebResponse response = sc.getResponse(request);
-                System.out.println("Count: " + number++ + response);
-                java.lang.Thread.sleep(200);
+                if (number == 1 || number == requestCount) {
+                    System.out.println("Count: " + number + ", status: " + response.getResponseCode());
+                }
             }
-        } catch (InterruptedException ex) {
-            Logger.getLogger("global").log(Level.SEVERE, null, ex);
+            long elapsed = System.currentTimeMillis() - startedAt;
+            System.out.println("Processed " + requestCount + " requests in " + elapsed + " ms");
         } catch (MalformedURLException ex) {
             Logger.getLogger("global").log(Level.SEVERE, null, ex);
         } catch (IOException ex) {
@@ -56,5 +60,12 @@ public class Main {
         } catch (SAXException ex) {
             Logger.getLogger("global").log(Level.SEVERE, null, ex);
         }
+    }
+
+    private static int getRequestCount(String[] args) {
+        if (args.length == 0) {
+            return DEFAULT_REQUEST_COUNT;
+        }
+        return Integer.parseInt(args[0]);
     }
 }

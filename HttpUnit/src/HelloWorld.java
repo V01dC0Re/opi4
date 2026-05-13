@@ -30,9 +30,9 @@ public class HelloWorld extends HttpServlet {
                 "<HEAD><TITLE>Hello World</TITLE></HEAD>\n" +
                 "<BODY>\n" +
                 "<H1>Hello World</H1>\n");
-        out.println("<script language=\"JavaScript\"type=\"text/javascript\">");
+        out.println("<script language=\"JavaScript\" type=\"text/javascript\">");
         out.println("<!--");
-        out.println("document.wr('Hello Document')");
+        out.println("document.write('Hello Document')");
         out.println("//-->");
         out.println("</script>");
         out.println("</BODY></HTML>");
