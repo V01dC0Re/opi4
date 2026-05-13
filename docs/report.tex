@@ -1,4 +1,4 @@
-\documentclass[a4paper,14pt]{extarticle}
+\documentclass[a4paper,11pt]{article}
 
 \usepackage[utf8]{inputenc}
 \usepackage[T2A]{fontenc}
@@ -10,12 +10,13 @@
 \usepackage{xcolor}
 \usepackage{hyperref}
 \usepackage{amsmath}
+\usepackage{microtype}
 
 \geometry{
-    left=30mm,
-    right=15mm,
+    left=20mm,
+    right=20mm,
     top=20mm,
-    bottom=20mm
+    bottom=25mm
 }
 
 \hypersetup{
@@ -54,28 +55,31 @@
 \begin{document}
 
 \begin{titlepage}
-    \begin{center}
-        Университет ИТМО\\
-        Факультет программной инженерии и компьютерной техники
+    \centering
+    Федеральное государственное автономное \\
+    образовательное учреждение высшего образования \\
+    \textbf{<<Национальный исследовательский университет ИТМО>>} \\
 
-        \vfill
+    \vfill
+    Основы программной инженерии \\
+    \vspace{0.5\baselineskip}
+    \textbf{Лабораторная работа №4} \\
+    \vspace{0.5\baselineskip}
+    Вариант 1406 \\
+    \vfill
 
-        {\Large Отчёт по лабораторной работе №4}\\[0.5cm]
-        {\large по дисциплине «Основы программной инженерии»}\\[0.5cm]
-        {\large Мониторинг и профилирование Java-приложения с использованием JMX}
+    \flushright
+    Выполнили:\\
+    Чупров Иван Андреевич Р3214 \\
+    Лесников Владимир Алексеевич Р3214 \\
+    \vspace{0.5\baselineskip}
+    Проверил:\\
+    Цопа Евгений Алексеевич
 
-        \vfill
+    \vspace{3\baselineskip}
 
-        \begin{flushright}
-            Выполнил: Чупров И. А.\\
-            Группа: Р3214
-        \end{flushright}
-
-        \vfill
-
-        Санкт-Петербург\\
-        2026
-    \end{center}
+    \centering
+    Санкт-Петербург, 2026
 \end{titlepage}
 
 \tableofcontents
