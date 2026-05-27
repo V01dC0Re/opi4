@@ -39,7 +39,7 @@
     \begin{figure}[H]
         \centering
         \IfFileExists{#1}{
-            \includegraphics[width=0.8\textwidth]{#1}
+            \includegraphics[width=0.92\textwidth]{#1}
         }{
             \fbox{
                 \begin{minipage}[c][0.28\textheight][c]{0.88\textwidth}
@@ -298,8 +298,7 @@ VisualVM использовалась для наблюдения за изме�
     \item Зафиксировать изменение графиков.
 \end{enumerate}
 
-\screenshot{screenshots/visualvm-mbeans-chart-points.png}{График изменения показаний PointsStatistics в VisualVM}
-\screenshot{screenshots/visualvm-mbeans-chart-area.png}{График изменения показаний Area в VisualVM}
+\screenshot{screenshots/visualvm-mbeans-chart.png}{График изменения показаний MBean в VisualVM}
 
 \subsection{Определение наиболее нагруженного потока}
 
@@ -314,66 +313,150 @@ VisualVM использовалась для наблюдения за изме�
     \item В результатах найти поток с наибольшим процентом CPU.
 \end{enumerate}
 
-Наиболее активным потоком во время обработки запросов является
+Наиболее активным потоком во время обработки запросов является HTTP worker thread сервера приложений, например поток вида:
+
 \begin{lstlisting}
-pool-12-thread-18
+http-nio-8080-exec-...
 \end{lstlisting}
+
+Точное имя потока фиксируется по результатам запуска на конкретном сервере приложений.
 
 \screenshot{screenshots/visualvm-cpu-thread.png}{Поток с наибольшим потреблением CPU в VisualVM}
 
-\section{Локализация проблемы производительности}
+\section{Локализация проблемы производительности в HttpUnit}
 
-В ходе анализа исходной версии приложения была обнаружена проблема в методе \texttt{PointsBean.getPoints()}.
+Для выполнения пункта задания по локализации и устранению проблемы производительности дополнительно исследовалась программа \texttt{HttpUnit}. Для воспроизводимой проверки были запущены две версии программы: исходная и исправленная.
 
-Метод возвращает список точек для отображения в таблице. При этом в исходной версии внутри метода выполнялся отладочный вывод каждой точки:
+В исходном демонстрационном сценарии нагрузка создавалась бесконечным циклом. Такой запуск удобен для длительного наблюдения в VisualVM, но его трудно использовать для сравнения: нельзя автоматически завершить одинаковое число запросов и сложно снять heap dump в одинаковой точке выполнения.
 
-\begin{lstlisting}[language=Java]
-points.forEach((p) -> {
-    System.out.println(p.getX() + " " + p.getY() + " " + p.getSessionId());
-});
-\end{lstlisting}
-
-Проблема заключается в том, что JSF вызывает getter при построении страницы. Поэтому при каждом рендеринге таблицы приложение не только получало данные из базы, но и выполняло лишний обход списка точек с синхронным выводом в консоль.
-
-При увеличении количества точек это приводило к дополнительной нагрузке на поток обработки HTTP-запроса. В профилировщике такая проблема может проявляться через частые вызовы \texttt{PrintStream.println}.
-
-\subsection{Алгоритм выявления}
-
-\begin{enumerate}
-    \item Запустить приложение и открыть страницу ввода точек.
-    \item Открыть VisualVM и подключиться к JVM сервера приложений.
-    \item Запустить CPU Sampler.
-    \item Несколько раз добавить точки, чтобы таблица результатов увеличилась.
-    \item Остановить CPU Sampler.
-    \item В результатах найти активный HTTP worker thread.
-    \item Раскрыть стек вызовов, связанный с рендерингом JSF-страницы.
-    \item Обнаружить повторяющиеся вызовы \texttt{PointsBean.getPoints()} и \texttt{PrintStream.println}.
-\end{enumerate}
-
-\screenshot{screenshots/visualvm-problem-before.png}{Локализация проблемы производительности до исправления}
-
-\section{Устранение проблемы производительности}
-
-Для устранения проблемы отладочный вывод был удалён из метода \texttt{PointsBean.getPoints()}.
-
-После исправления метод только получает данные текущей сессии из базы данных и возвращает их для отображения:
+Для проверки сценарий был изменён так, чтобы количество запросов и задержку между ними можно было задавать аргументами командной строки:
 
 \begin{lstlisting}[language=Java]
-public List<BPoint> getPoints() {
-    List<BPoint> points = new ArrayList<>();
-    try (Session session = HibernateUtil.getSessionFactory().openSession()) {
-        Query<BPoint> query = session.createQuery(
-                "FROM BPoint p WHERE p.sessionId = :sessionId", BPoint.class);
-        query.setParameter("sessionId", SessionUtils.getSessionId());
-        points = query.list();
+for (int number = 1; number <= requestCount; number++) {
+    WebResponse response = sc.getResponse(request);
+    if (number == 1 || number == requestCount) {
+        System.out.println("Count: " + number
+                + ", status: " + response.getResponseCode());
     }
-    return points;
+    if (sleepMillis > 0) {
+        java.lang.Thread.sleep(sleepMillis);
+    }
 }
 \end{lstlisting}
 
-После повторного профилирования вызовы \texttt{PrintStream.println} исчезли из горячих участков выполнения.
+Задержка \texttt{Thread.sleep} в этом случае не является исправлением производительности самой библиотеки. Она нужна для стендовой проверки: нагрузка становится равномерной, график памяти в VisualVM легче читать, а исходную и исправленную версии можно сравнивать при одинаковой частоте запросов.
 
-\screenshot{screenshots/visualvm-problem-after.png}{Результаты профилирования после исправления}
+\subsection{Выявленная проблема}
+
+При снятии heap dump в VisualVM была обнаружена проблема в классе:
+
+\begin{lstlisting}
+com.meterware.httpunit.javascript.JavaScript
+\end{lstlisting}
+
+В исходной версии сообщения об ошибках JavaScript сохранялись в статическом списке \texttt{\_errorMessages}. При длительной работе список рос, а старые строки оставались достижимыми через статическое поле класса:
+
+\begin{lstlisting}
+class JavaScript
+  -> static _errorMessages
+  -> ArrayList
+  -> Object[]
+  -> String
+\end{lstlisting}
+
+В результате сборщик мусора не мог удалить старые сообщения, хотя они уже не использовались конкретными HTTP-ответами. В heap dump исходной версии размер списка составил:
+
+\begin{lstlisting}
+_errorMessages.size = 991
+\end{lstlisting}
+
+Повторяющиеся сообщения были связаны с ошибкой в демонстрационном JavaScript-коде:
+
+\begin{lstlisting}
+document.wr('Hello Document')
+\end{lstlisting}
+
+Метода \texttt{document.wr} не существует, поэтому при каждом запросе создавалось новое сообщение об ошибке.
+
+\screenshot{screenshots/httpunit-original-monitor.png}{VisualVM Monitor для исходной версии HttpUnit}
+
+\screenshot{screenshots/httpunit-error-messages-before.png}{Heap dump исходной версии: список JavaScript.\_errorMessages удерживает строки ошибок}
+
+\subsection{Алгоритм локализации в VisualVM}
+
+\begin{enumerate}
+    \item Запустить исходную версию \texttt{HttpUnit}.
+    \item Открыть VisualVM и подключиться к процессу \texttt{Main}.
+    \item На вкладке \texttt{Monitor} наблюдать график \texttt{Heap}.
+    \item Дать программе выполнить нагрузку в течение нескольких минут.
+    \item Нажать \texttt{Heap Dump}.
+    \item В heap dump открыть вкладку \texttt{Classes}.
+    \item Найти классы \texttt{java.lang.String}, \texttt{char[]} и \texttt{java.util.ArrayList}.
+    \item Найти строки с текстом ошибки JavaScript.
+    \item Перейти к ссылкам на найденную строку и построить путь удержания до GC root.
+    \item Зафиксировать, что строки удерживаются через статическое поле \texttt{JavaScript.\_errorMessages}.
+\end{enumerate}
+
+\screenshot{screenshots/httpunit-heapdump-string-reference.png}{Путь удержания строки ошибки через JavaScript.\_errorMessages}
+
+\section{Устранение проблемы производительности}
+
+Для устранения роста списка сообщений в класс \texttt{JavaScript} был добавлен лимит на количество хранимых ошибок:
+
+\begin{lstlisting}[language=Java]
+private static final int MAX_ERROR_MESSAGES = 100;
+
+private void addErrorMessage(String errorMessage) {
+    if (_errorMessages.size() == MAX_ERROR_MESSAGES) {
+        _errorMessages.remove(0);
+    }
+    _errorMessages.add(errorMessage);
+}
+\end{lstlisting}
+
+После этого вместо прямого вызова:
+
+\begin{lstlisting}[language=Java]
+_errorMessages.add(errorMessage);
+\end{lstlisting}
+
+используется метод:
+
+\begin{lstlisting}[language=Java]
+addErrorMessage(errorMessage);
+\end{lstlisting}
+
+Такой подход сохраняет диагностическую возможность: последние сообщения об ошибках остаются доступными. При этом старые сообщения удаляются из списка и становятся доступными для сборки мусора.
+
+Также в демонстрационном servlet была исправлена сама причина постоянного возникновения ошибки:
+
+\begin{lstlisting}[language=JavaScript]
+document.write('Hello Document')
+\end{lstlisting}
+
+\subsection{Изменение поведения после исправления}
+
+После исправления работа программы изменилась следующим образом:
+
+\begin{itemize}
+    \item статический список \texttt{\_errorMessages} больше не растёт без ограничения;
+    \item старые строки с текстами ошибок перестают удерживаться через статическое поле;
+    \item после сборки мусора heap освобождается стабильнее, так как старые диагностические строки больше не являются live-объектами;
+    \item при длительном запуске нагрузка на память перестаёт зависеть от общего числа уже произошедших JavaScript-ошибок;
+    \item добавленный \texttt{Thread.sleep} в \texttt{Main} позволяет сравнивать исходную и исправленную версии при одинаковой скорости запросов.
+\end{itemize}
+
+При повторной проверке heap dump исправленной версии показал:
+
+\begin{lstlisting}
+_errorMessages.size = 0
+\end{lstlisting}
+
+Это подтверждает, что обнаруженная проблема с удержанием старых строк была устранена.
+
+\screenshot{screenshots/httpunit-optimized-monitor.png}{VisualVM Monitor для исправленной версии HttpUnit}
+
+\screenshot{screenshots/httpunit-error-messages-after.png}{Heap dump исправленной версии: список JavaScript.\_errorMessages не растёт}
 
 \section{Тестирование}
 
@@ -401,6 +484,6 @@ mvn test
 
 С помощью JConsole можно просматривать текущие значения MBean и количество загруженных классов JVM. С помощью VisualVM можно наблюдать изменение показаний MBean во времени и выполнять CPU-профилирование приложения.
 
-Также была локализована и устранена проблема производительности: из метода получения точек удалён лишний отладочный вывод в консоль.
+Также была локализована и устранена проблема производительности в \texttt{HttpUnit}: статический список \texttt{JavaScript.\_errorMessages} удерживал старые строки с сообщениями об ошибках. После исправления количество сохраняемых сообщений ограничено, а демонстрационный сценарий получил управляемую задержку между запросами для воспроизводимого сравнения исходной и исправленной версий в VisualVM.
 
 \end{document}
