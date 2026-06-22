@@ -298,7 +298,7 @@ VisualVM использовалась для наблюдения за изме�
     \item Зафиксировать изменение графиков.
 \end{enumerate}
 
-\screenshot{screenshots/visualvm-mbeans-chart.png}{График изменения показаний MBean в VisualVM}
+\screenshot{screenshots/visualvm-mbeans-chart-points.png}{График изменения показаний MBean в VisualVM}
 
 \subsection{Определение наиболее нагруженного потока}
 
@@ -323,81 +323,48 @@ http-nio-8080-exec-...
 
 \screenshot{screenshots/visualvm-cpu-thread.png}{Поток с наибольшим потреблением CPU в VisualVM}
 
-\section{Локализация проблемы производительности в HttpUnit}
+\section{Локализация проблемы производительности}
 
-Для выполнения пункта задания по локализации и устранению проблемы производительности дополнительно исследовалась программа \texttt{HttpUnit}. Для воспроизводимой проверки были запущены две версии программы: исходная и исправленная.
-
-В исходном демонстрационном сценарии нагрузка создавалась бесконечным циклом. Такой запуск удобен для длительного наблюдения в VisualVM, но его трудно использовать для сравнения: нельзя автоматически завершить одинаковое число запросов и сложно снять heap dump в одинаковой точке выполнения.
-
-Для проверки сценарий был изменён так, чтобы количество запросов и задержку между ними можно было задавать аргументами командной строки:
-
-\begin{lstlisting}[language=Java]
-for (int number = 1; number <= requestCount; number++) {
-    WebResponse response = sc.getResponse(request);
-    if (number == 1 || number == requestCount) {
-        System.out.println("Count: " + number
-                + ", status: " + response.getResponseCode());
-    }
-    if (sleepMillis > 0) {
-        java.lang.Thread.sleep(sleepMillis);
-    }
-}
-\end{lstlisting}
-
-Задержка \texttt{Thread.sleep} в этом случае не является исправлением производительности самой библиотеки. Она нужна для стендовой проверки: нагрузка становится равномерной, график памяти в VisualVM легче читать, а исходную и исправленную версии можно сравнивать при одинаковой частоте запросов.
+Для локализации проблемы производительности использовалась программа
+\texttt{HttpUnit} под нагрузкой. Анализ проводился с помощью Java Mission
+Control (JMC) и записей Java Flight Recorder (JFR).
 
 \subsection{Выявленная проблема}
 
-При снятии heap dump в VisualVM была обнаружена проблема в классе:
+\screenshot{screenshots/jmc-heap-usage.jpg}{График изменения Heap Usage}
 
-\begin{lstlisting}
-com.meterware.httpunit.javascript.JavaScript
-\end{lstlisting}
+При анализе JFR-записи обнаружено, что после каждого цикла сборки мусора
+нижняя граница используемой памяти не возвращается к исходному уровню, а
+постепенно растёт. В таблице классов с наибольшим приростом живущих объектов
+(`Live Size Increase`) лидировали классы \texttt{byte[]} и
+\texttt{java.util.TreeMap\$Entry}. В событии \texttt{Old Object Sample}
+объекты этих классов имели большой возраст и сохранялись через GC Root,
+что указывало на удерживание ссылок и невозможность их удаления сборщиком
+мусора.
 
-В исходной версии сообщения об ошибках JavaScript сохранялись в статическом списке \texttt{\_errorMessages}. При длительной работе список рос, а старые строки оставались достижимыми через статическое поле класса:
-
-\begin{lstlisting}
-class JavaScript
-  -> static _errorMessages
-  -> ArrayList
-  -> Object[]
-  -> String
-\end{lstlisting}
-
-В результате сборщик мусора не мог удалить старые сообщения, хотя они уже не использовались конкретными HTTP-ответами. В heap dump исходной версии размер списка составил:
-
-\begin{lstlisting}
-_errorMessages.size = 991
-\end{lstlisting}
-
-Повторяющиеся сообщения были связаны с ошибкой в демонстрационном JavaScript-коде:
-
-\begin{lstlisting}
-document.wr('Hello Document')
-\end{lstlisting}
-
-Метода \texttt{document.wr} не существует, поэтому при каждом запросе создавалось новое сообщение об ошибке.
-
-\screenshot{screenshots/httpunit-original-monitor.png}{VisualVM Monitor для исходной версии HttpUnit}
-
-\screenshot{screenshots/httpunit-error-messages-before.png}{Heap dump исходной версии: список JavaScript.\_errorMessages удерживает строки ошибок}
-
-\subsection{Алгоритм локализации в VisualVM}
+\subsection{Алгоритм локализации в JMC}
 
 \begin{enumerate}
-    \item Запустить исходную версию \texttt{HttpUnit}.
-    \item Открыть VisualVM и подключиться к процессу \texttt{Main}.
-    \item На вкладке \texttt{Monitor} наблюдать график \texttt{Heap}.
-    \item Дать программе выполнить нагрузку в течение нескольких минут.
-    \item Нажать \texttt{Heap Dump}.
-    \item В heap dump открыть вкладку \texttt{Classes}.
-    \item Найти классы \texttt{java.lang.String}, \texttt{char[]} и \texttt{java.util.ArrayList}.
-    \item Найти строки с текстом ошибки JavaScript.
-    \item Перейти к ссылкам на найденную строку и построить путь удержания до GC root.
-    \item Зафиксировать, что строки удерживаются через статическое поле \texttt{JavaScript.\_errorMessages}.
+    \item Запустить приложение с включённым JFR и опцией \texttt{Old Object Sample}.
+    \item Открыть запись в JMC, перейти в раздел \texttt{Java Application → Memory}.
+    \item На графике \texttt{Used Heap} проверить, что после каждого GC нижняя граница памяти возрастает (признак утечки).
+    \item В таблице отсортировать классы по показателю \texttt{Live Size Increase} и выделить те, у которых рост максимален.
+    \item В \texttt{Event Browser} выбрать \texttt{Old Object Sample} для подозрительных классов и изучить:
+    \begin{itemize}
+        \item \texttt{Object Age} — время жизни объектов;
+        \item \texttt{Last Known Heap Usage} — занимаемый объём;
+        \item \texttt{GC Root} — причину, по которой объекты остаются достижимыми.
+        \item \texttt{Stack Trace} — методы которые создают эти объекты.
+    \end{itemize}
+    \item Сделать вывод: утечка подтверждается, если после GC память не уменьшается, класс стабильно лидирует
+        по приросту, а его объекты долго живут и создаются через вызовы нашего кода.
 \end{enumerate}
 
-\screenshot{screenshots/httpunit-heapdump-string-reference.png}{Путь удержания строки ошибки через JavaScript.\_errorMessages}
+\screenshot{screenshots/jmc-target.jpg}{Таблица Old Object Sample}
+
+В результате для \texttt{HttpUnit} подозрительными оказались \texttt{byte[]} и \texttt{TreeMap\$Entry},
+но \texttt{TreeMap} исходит из внутренних классов JMV когда \texttt{byte[]} лежит в строках
+создаваемых в нашем методе.
 
 \section{Устранение проблемы производительности}
 
@@ -430,53 +397,11 @@ addErrorMessage(errorMessage);
 
 Также в демонстрационном servlet была исправлена сама причина постоянного возникновения ошибки:
 
-\begin{lstlisting}[language=JavaScript]
+\begin{lstlisting}
 document.write('Hello Document')
 \end{lstlisting}
 
-\subsection{Изменение поведения после исправления}
 
-После исправления работа программы изменилась следующим образом:
-
-\begin{itemize}
-    \item статический список \texttt{\_errorMessages} больше не растёт без ограничения;
-    \item старые строки с текстами ошибок перестают удерживаться через статическое поле;
-    \item после сборки мусора heap освобождается стабильнее, так как старые диагностические строки больше не являются live-объектами;
-    \item при длительном запуске нагрузка на память перестаёт зависеть от общего числа уже произошедших JavaScript-ошибок;
-    \item добавленный \texttt{Thread.sleep} в \texttt{Main} позволяет сравнивать исходную и исправленную версии при одинаковой скорости запросов.
-\end{itemize}
-
-При повторной проверке heap dump исправленной версии показал:
-
-\begin{lstlisting}
-_errorMessages.size = 0
-\end{lstlisting}
-
-Это подтверждает, что обнаруженная проблема с удержанием старых строк была устранена.
-
-\screenshot{screenshots/httpunit-optimized-monitor.png}{VisualVM Monitor для исправленной версии HttpUnit}
-
-\screenshot{screenshots/httpunit-error-messages-after.png}{Heap dump исправленной версии: список JavaScript.\_errorMessages не растёт}
-
-\section{Тестирование}
-
-Для проверки логики MBean был добавлен тестовый класс \texttt{JmxBeanTest}.
-
-Проверяются следующие сценарии:
-\begin{itemize}
-    \item подсчёт общего количества точек;
-    \item подсчёт промахов;
-    \item отправка уведомления после четырёх промахов подряд;
-    \item вычисление площади фигуры при заданном радиусе.
-\end{itemize}
-
-Команда запуска тестов:
-
-\begin{lstlisting}
-mvn test
-\end{lstlisting}
-
-В текущем окружении запуск тестов не был выполнен, так как в переменной \texttt{PATH} отсутствует Maven, а доступная Java имеет версию 8, тогда как проект настроен на Java 17.
 
 \section{Вывод}
 
@@ -484,6 +409,5 @@ mvn test
 
 С помощью JConsole можно просматривать текущие значения MBean и количество загруженных классов JVM. С помощью VisualVM можно наблюдать изменение показаний MBean во времени и выполнять CPU-профилирование приложения.
 
-Также была локализована и устранена проблема производительности в \texttt{HttpUnit}: статический список \texttt{JavaScript.\_errorMessages} удерживал старые строки с сообщениями об ошибках. После исправления количество сохраняемых сообщений ограничено, а демонстрационный сценарий получил управляемую задержку между запросами для воспроизводимого сравнения исходной и исправленной версий в VisualVM.
-
+Также была локализована и устранена проблема производительности в \texttt{HttpUnit}: статический список \texttt{JavaScript.\_errorMessages} удерживал старые строки с сообщениями об ошибках. После исправления количество сохраняемых сообщений ограничено.
 \end{document}
